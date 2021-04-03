@@ -11,7 +11,14 @@ import (
 	cmap "github.com/orcaman/concurrent-map"
 )
 
-type Retriever interface{}
+type Retriever interface {
+	Start()
+	Stop()
+	InitializeSummary(jobType dispatcher.JobType, corpusName string, jobs int, ttl time.Time)
+	GetSummary(jobType dispatcher.JobType, corpusName string) (map[string]int64, error)
+	QuerySummary(jobType dispatcher.JobType, corpusName string) (map[string]int64, error)
+	UpdateSummary(results *Results)
+}
 
 type retrieverImplementation struct {
 	logger       *log.Logger
@@ -46,7 +53,7 @@ func (ri *retrieverImplementation) Start() {
 		case results := <-ri.resultsChan:
 			go ri.addResults(results)
 		case <-ri.done:
-			ri.cleanup()
+			ri.pool.Close()
 			return
 		}
 	}
@@ -94,6 +101,10 @@ func (ri *retrieverImplementation) GetSummary(
 	summary, err := ri.getSummary(summaryType, corpusName)
 	if err != nil {
 		return nil, errors.Wrap(err, "couldn't get summary: ")
+	}
+
+	if !summary.ttl.IsZero() && summary.ttl.Before(time.Now()) {
+		return nil, errors.New("summary expired")
 	}
 
 	return summary.GetResults(), nil
@@ -144,7 +155,7 @@ func (ri *retrieverImplementation) poolAddResults(payload interface{}) interface
 		return errors.Wrap(err, "couldn't get summary")
 	}
 
-	summary.AddResults(results.results)
+	summary.AddResults(results.Results)
 	return nil
 }
 
@@ -175,8 +186,4 @@ func (ri *retrieverImplementation) getSummary(
 	}
 
 	return summary, nil
-}
-
-func (ri *retrieverImplementation) cleanup() {
-	ri.pool.Close()
 }

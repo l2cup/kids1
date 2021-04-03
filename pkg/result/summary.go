@@ -22,7 +22,7 @@ type Summary struct {
 type Results struct {
 	JobType    dispatcher.JobType
 	CorpusName string
-	results    map[string]int64
+	Results    map[string]int64
 }
 
 func (s *Summary) GetResults() map[string]int64 {

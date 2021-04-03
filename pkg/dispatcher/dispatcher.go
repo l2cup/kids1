@@ -5,20 +5,6 @@ import (
 	"github.com/orcaman/concurrent-map"
 )
 
-type JobType string
-type JobPayload = interface{}
-
-const (
-	WebJobType       JobType = "WEB_JOB_TYPE"
-	FileJobType      JobType = "FILE_JOB_TYPE"
-	DirectoryJobType JobType = "DIRECTORY_JOB_TYPE"
-)
-
-type Job struct {
-	Type    JobType
-	Payload JobPayload
-}
-
 type Config struct {
 	Logger     log.Logger
 	BufferSize int

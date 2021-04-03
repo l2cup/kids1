@@ -3,6 +3,7 @@ module github.com/l2cup/kids1
 go 1.16
 
 require (
+	github.com/Jeffail/tunny v0.0.0-20210126202424-1b37d6cb867a
 	github.com/go-redis/redis/v8 v8.8.0
 	github.com/joho/godotenv v1.3.0
 	github.com/mitchellh/mapstructure v1.4.1

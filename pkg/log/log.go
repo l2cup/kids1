@@ -1,5 +1,20 @@
 package log
 
+import (
+	"os"
+
+	"github.com/pkg/errors"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+)
+
+const (
+	DebugVerbosity = "DEBUG"
+	InfoVerbosity  = "INFO"
+	WarnVerbosity  = "WARN"
+	ErrorVerbosity = "ERROR"
+)
+
 type Logger struct {
 	zlog *zap.SugaredLogger
 }
@@ -20,7 +35,7 @@ func NewLogger(config *Config) (*Logger, error) {
 	zapLogger, err := newZapLogger(config)
 
 	if err != nil {
-		return nil, pkgerrors.Wrap(err, "new zap logger")
+		return nil, errors.Wrap(err, "new zap logger")
 	}
 
 	zap.ReplaceGlobals(zapLogger)
@@ -78,13 +93,13 @@ func (log *Logger) Fatal(msg string, fields ...interface{}) {
 
 func mapVerbosityLevel(verbosity string) zapcore.Level {
 	switch verbosity {
-	case log.DebugVerbosity:
+	case DebugVerbosity:
 		return zapcore.DebugLevel
-	case log.InfoVerbosity:
+	case InfoVerbosity:
 		return zapcore.InfoLevel
-	case log.WarnVerbosity:
+	case WarnVerbosity:
 		return zapcore.WarnLevel
-	case log.ErrorVerbosity:
+	case ErrorVerbosity:
 		return zapcore.ErrorLevel
 	default:
 		return zapcore.InfoLevel

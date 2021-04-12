@@ -49,6 +49,7 @@ func (s *Summary) AddResults(results map[string]int64) {
 	for k, v := range results {
 		if existing, ok := s.results[k]; ok {
 			s.results[k] = existing + v
+			continue
 		}
 		s.results[k] = v
 	}

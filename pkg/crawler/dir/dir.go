@@ -3,7 +3,6 @@ package dir
 import (
 	"fmt"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -45,6 +44,7 @@ func NewCrawlerImplementation(c *Config) crawler.DirCrawler {
 	return &crawlerImplementation{
 		Crawler:           c.Crawler,
 		lastModifiedCache: make(map[string]time.Time),
+		dispatcher:        c.Dispatcher,
 		done:              make(chan struct{}),
 		sleepTime:         sleepTime,
 		directories:       make([]string, 0),
@@ -54,18 +54,14 @@ func NewCrawlerImplementation(c *Config) crawler.DirCrawler {
 }
 
 func (ci *crawlerImplementation) Start() {
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
-
 	ticker := time.NewTicker(ci.sleepTime)
+	ticker.Reset(ci.sleepTime)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ticker.C:
 			go ci.crawl()
-		case <-interrupt:
-			return
 		case <-ci.done:
 			return
 		}
@@ -76,8 +72,23 @@ func (ci *crawlerImplementation) AddDirectoryPath(path string) errors.Error {
 	defer ci.mutex.Unlock()
 	ci.mutex.Lock()
 
-	ci.directories = append(ci.directories, path)
-	go ci.crawlDir(path)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return errors.New(fmt.Sprintf("path %s doesn't exist", path), errors.InternalServerError, "path", path)
+	}
+
+	exists := false
+	for _, dir := range ci.directories {
+		if dir == path {
+			exists = true
+			break
+		}
+	}
+
+	if !exists {
+		ci.directories = append(ci.directories, path)
+	}
+
+	go ci.crawlDir(path, true)
 
 	return errors.Nil()
 }
@@ -95,13 +106,13 @@ func (ci *crawlerImplementation) crawl() {
 	}
 
 	for _, dir := range ci.directories {
-		ci.crawlDir(dir)
+		ci.crawlDir(dir, false)
 	}
 }
 
-func (ci *crawlerImplementation) crawlDir(path string) {
+func (ci *crawlerImplementation) crawlDir(dirPath string, clearCache bool) {
 
-	err := filepath.Walk(path, func(path string, f os.FileInfo, err error) error {
+	err := filepath.Walk(dirPath, func(path string, f os.FileInfo, err error) error {
 		if !strings.HasPrefix(f.Name(), ci.prefix) || !f.IsDir() {
 			return nil
 		}
@@ -113,7 +124,8 @@ func (ci *crawlerImplementation) crawlDir(path string) {
 			return filepath.SkipDir
 		}
 
-		if lastMod != f.ModTime() {
+		if lastMod != f.ModTime() || clearCache {
+			ci.lastModifiedCache[path] = f.ModTime()
 			ci.pushJob(f.Name(), path, f.Size())
 		}
 
@@ -121,7 +133,7 @@ func (ci *crawlerImplementation) crawlDir(path string) {
 	})
 
 	if err != nil {
-		ci.Logger.Error("error walking path", "err", err, "path", path)
+		ci.Logger.Error("error walking path", "err", err, "path", dirPath)
 	}
 }
 

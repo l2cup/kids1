@@ -19,7 +19,9 @@ type Retriever interface {
 	InitializeSummary(jobType dispatcher.JobType, corpusName string, jobs int, ttl time.Time)
 	IncrementResultCount(summaryType dispatcher.JobType, corpusName string) error
 	GetSummary(jobType dispatcher.JobType, corpusName string) (map[string]int64, error)
+	GetSummaries(summaryType dispatcher.JobType) (map[string]map[string]int64, error)
 	QuerySummary(jobType dispatcher.JobType, corpusName string) (map[string]int64, error)
+	DeleteSummary(summaryType dispatcher.JobType)
 	UpdateSummary(results *Results)
 }
 
@@ -93,7 +95,7 @@ func (ri *retrieverImplementation) InitializeSummary(
 
 	if summariesMap.Has(corpusName) {
 		isummary, _ := summariesMap.Get(corpusName)
-		existing, ok := isummary.(Summary)
+		existing, ok := isummary.(*Summary)
 		if !ok {
 			ri.logger.Fatal("couldn't cast summary to summary", "type", fmt.Sprintf("%T", isummary))
 		}
@@ -103,6 +105,7 @@ func (ri *retrieverImplementation) InitializeSummary(
 		}
 	}
 
+	ri.logger.Info("created corpus", "corpus_name", corpusName, "summary", summary)
 	summariesMap.Set(corpusName, summary)
 }
 
@@ -141,36 +144,55 @@ func (ri *retrieverImplementation) QuerySummary(
 	return summary.QueryResults(), nil
 }
 
-func (ri *retrieverImplementation) UpdateSummary(results *Results) {
-	ri.resultsChan <- results
-}
-
-func (ri *retrieverImplementation) DeleteSummary(summaryType dispatcher.JobType, corpusName string) error {
+func (ri *retrieverImplementation) GetSummaries(summaryType dispatcher.JobType) (map[string]map[string]int64, error) {
 	summaries, ok := ri.summariesMap.Get(string(summaryType))
 	if !ok {
 		ri.logger.Error("summaries map for job type doesn't exist")
-		return errors.New("summaries map for job type doens't exist")
+		return nil, errors.New("summaries map for job type doens't exist")
 	}
 
 	summariesMap, ok := summaries.(cmap.ConcurrentMap)
 	if !ok {
 		ri.logger.Fatal("couldn't cast summaries to concurrent map")
-		return errors.New("couldn't cast summaries to concurrent map")
+		return nil, errors.New("couldn't cast summaries to concurrent map")
 	}
 
-	exists := summariesMap.Has(corpusName)
-	if !exists {
-		return errors.New("summary doesn't exist")
+	mutex := sync.Mutex{}
+	retMap := make(map[string]map[string]int64)
+
+	for kvPair := range summariesMap.IterBuffered() {
+		summary, ok := kvPair.Val.(*Summary)
+		if !ok {
+			return nil, errors.New("map value couldn't be cast as summary")
+		}
+
+		go func(summary *Summary, corpusName string) {
+			defer mutex.Unlock()
+			results := summary.GetResults()
+			mutex.Lock()
+			retMap[corpusName] = results
+		}(summary, kvPair.Key)
 	}
-	summariesMap.Remove(corpusName)
-	return nil
+
+	return retMap, nil
+}
+
+func (ri *retrieverImplementation) UpdateSummary(results *Results) {
+	ri.resultsChan <- results
+	ri.logger.Debug("updated summary", "results", results)
+}
+
+func (ri *retrieverImplementation) DeleteSummary(summaryType dispatcher.JobType) {
+	ri.summariesMap.Set(string(summaryType), cmap.New())
 }
 
 func (ri *retrieverImplementation) addResults(results *Results) {
 	if ri.pool.GetSize() == 0 {
+		ri.logger.Info("[result retriever] pool size is 0")
 		return
 	}
 
+	ri.logger.Debug("starting pool results adding")
 	_, err := ri.pool.ProcessTimed(results, 60*time.Second)
 
 	if err == tunny.ErrJobTimedOut {
@@ -194,7 +216,7 @@ func (ri *retrieverImplementation) IncrementResultCount(summaryType dispatcher.J
 }
 
 func (ri *retrieverImplementation) poolAddResults(payload interface{}) interface{} {
-	results, ok := payload.(Results)
+	results, ok := payload.(*Results)
 	if !ok {
 		return errors.New("couldn't convert payload")
 	}
@@ -205,6 +227,7 @@ func (ri *retrieverImplementation) poolAddResults(payload interface{}) interface
 	}
 
 	summary.AddResults(results.Results)
+	ri.logger.Debug("updated results in pool")
 	return nil
 }
 
@@ -226,7 +249,7 @@ func (ri *retrieverImplementation) getSummary(
 
 	isummary, ok := summariesMap.Get(corpusName)
 	if !ok {
-		return nil, errors.New("corpus with that name doesn't exist, couldn't update")
+		return nil, errors.New("corpus with that name doesn't exist")
 	}
 
 	summary, ok := isummary.(*Summary)

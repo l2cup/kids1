@@ -37,6 +37,7 @@ func (d *Dispatcher) Push(job *Job) {
 		d.logger.Fatal("[fatal] push couldn't cast channel to job channel")
 	}
 
+	d.logger.Debug("pushed job", "job", job)
 	ch <- job
 }
 

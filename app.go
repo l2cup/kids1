@@ -1,4 +1,4 @@
-package app
+package kids1
 
 import (
 	golog "log"
@@ -14,8 +14,13 @@ import (
 )
 
 const (
-	EnvLogVerbosity = "LOG_VERBOSITY"
-	EnvNotSet       = "ENV_NOT_SET"
+	EnvLogVerbosity         = "LOG_VERBOSITY"
+	EnvPropertiesConfigPath = "PROP_CONFIG_PATH"
+	EnvJsonCofigPath        = "JSON_CONFIG_PATH"
+	EnvNotSet               = "ENV_NOT_SET"
+
+	ConfigPathDefaultProp = "./config.properties"
+	ConfigPathDefaultJson = "./config.json"
 )
 
 type App struct {
@@ -31,17 +36,18 @@ type App struct {
 func New() *App {
 	logger, err := log.NewLogger(&log.Config{
 		LogVerbosity: config.GetEnv(EnvLogVerbosity, EnvNotSet),
+		//LogVerbosity: log.DebugVerbosity,
 	})
 
 	if err != nil {
 		golog.Fatalf("couldn't initialize logger, err : %s", err)
 	}
 
-	syscfg, err := config.LoadConfigFile("./config.properties")
+	syscfg, err := config.LoadConfigFile(config.GetEnv(EnvPropertiesConfigPath, ConfigPathDefaultProp))
 	if err != nil {
 		logger.Error("[syscfg]couldn't load properties syscfg, trying json",
 			"err", err)
-		syscfg, err = config.LoadConfigFile("./config.json")
+		syscfg, err = config.LoadConfigFile(config.GetEnv(EnvJsonCofigPath, ConfigPathDefaultJson))
 		if err != nil {
 			logger.Fatal("[syscfg]couldn't load json syscfg, exiting.",
 				"err", err)
@@ -88,4 +94,10 @@ func New() *App {
 		FileCrawler:      fileCrawler,
 		WebCrawler:       webCrawler,
 	}
+}
+
+func (a *App) Stop() {
+	a.WebCrawler.Stop()
+	a.FileCrawler.Stop()
+	a.DirectoryCrawler.Stop()
 }

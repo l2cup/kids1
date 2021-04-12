@@ -1,6 +1,7 @@
 package file
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,6 +41,7 @@ func NewCrawlerImplementation(c *Config) crawler.FileCrawler {
 	ci := &crawlerImplementation{
 		Crawler:              c.Crawler,
 		dispatcher:           c.Dispatcher,
+		resultRetriever:      c.ResultRetriever,
 		keywords:             c.Keywords,
 		done:                 make(chan struct{}),
 		queuedFilesSizeLimit: c.QueuedFilesSizeLimit,
@@ -62,21 +64,32 @@ func (ci *crawlerImplementation) Start() {
 }
 
 func (ci *crawlerImplementation) handleDirectory(payload dispatcher.JobPayload) {
-	dirPayload, ok := payload.(dispatcher.DirectoryCrawlerPayload)
+	dirPayload, ok := payload.(*dispatcher.DirectoryCrawlerPayload)
 	if !ok {
-		ci.Logger.Error("payload not of type directory crawler payload")
+		ci.Logger.Error("payload not of type directory crawler payload", "type", fmt.Sprintf("%T", payload))
+		return
 	}
 
 	filePayloads := make([]*dispatcher.FileCrawlerPayload, 0)
 
-	filepath.Walk(dirPayload.Path, func(path string, f os.FileInfo, err error) error {
+	err := filepath.Walk(dirPayload.Path, func(path string, f os.FileInfo, err error) error {
+		if f.IsDir() {
+			return nil
+		}
+
 		filePayloads = append(filePayloads, &dispatcher.FileCrawlerPayload{
 			CorpusName: dirPayload.CorpusName,
 			Path:       path,
 			Size:       f.Size(),
 		})
+		ci.Logger.Debug("appended file payload", "payload", filePayloads)
 		return nil
 	})
+
+	if err != nil {
+		ci.Logger.Error("couldn't handle directory", "err", err)
+		return
+	}
 
 	ci.resultRetriever.InitializeSummary(dispatcher.FileJobType, dirPayload.CorpusName, len(filePayloads), time.Time{})
 
@@ -90,6 +103,8 @@ func (ci *crawlerImplementation) handleDirectory(payload dispatcher.JobPayload) 
 		filesPerBatch += 1
 	}
 
+	ci.Logger.Debug("finished calculating", "min_job_count", minimumJobCount, "files_per_batch", filesPerBatch)
+
 	for i := 0; i < int(minimumJobCount); i++ {
 		queuedFiles := make([]*dispatcher.FileCrawlerPayload, 0, filesPerBatch)
 
@@ -100,7 +115,7 @@ func (ci *crawlerImplementation) handleDirectory(payload dispatcher.JobPayload) 
 			queuedFiles = append(queuedFiles, filePayloads[i*int(minimumJobCount)+j])
 		}
 
-		go ci.startWCWorker(queuedFiles)
+		go ci.startWCWorker(append(make([]*dispatcher.FileCrawlerPayload, 0, len(queuedFiles)), queuedFiles...))
 	}
 }
 
@@ -110,6 +125,7 @@ func (ci *crawlerImplementation) startWCWorker(payload []*dispatcher.FileCrawler
 	}
 
 	_, err := ci.pool.ProcessTimed(payload, 60*time.Second)
+	ci.Logger.Debug("started timed file process with payload", "payload", payload)
 
 	if err == tunny.ErrJobTimedOut {
 		ci.Logger.Error("goroutine timed out", "err", err)
@@ -130,7 +146,7 @@ func (ci *crawlerImplementation) wordCounterWorker(payload interface{}) interfac
 	for _, fp := range filePayloads {
 		err := ci.countWords(fp)
 		if err != nil {
-			ci.Logger.Error("couldn't count words for file")
+			ci.Logger.Error("couldn't count words for file", "err", err)
 		}
 	}
 	return nil
@@ -139,9 +155,10 @@ func (ci *crawlerImplementation) wordCounterWorker(payload interface{}) interfac
 func (ci *crawlerImplementation) countWords(filePayload *dispatcher.FileCrawlerPayload) error {
 	data, err := os.ReadFile(filePayload.Path)
 	if err != nil {
-		return errors.Wrap(err, "couldn't read file")
+		return errors.Wrap(err, fmt.Sprintf("couldn't read file, path %s", filePayload.Path))
 	}
 
+	ci.Logger.Debug("starting word count for file", "file", filePayload.Path)
 	results := make(map[string]int64)
 	for _, word := range ci.keywords {
 		results[word] = 0
@@ -153,6 +170,8 @@ func (ci *crawlerImplementation) countWords(filePayload *dispatcher.FileCrawlerP
 			results[w] = result + 1
 		}
 	}
+
+	ci.Logger.Debug("ended word count for file", "file", filePayload.Path, "results", results)
 
 	ci.resultRetriever.UpdateSummary(&result.Results{
 		JobType:    dispatcher.FileJobType,

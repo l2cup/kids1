@@ -12,9 +12,12 @@
 *.so
 *.dylib
 cmd/cmd
+cmd/wc
 cmd/worker
 cmd/api/worker
 cmd/api/api
+cmd/example/
+cmd/corpus_test/
 
 cmd/scheduler/scheduler
 cmd/scheduler/worker

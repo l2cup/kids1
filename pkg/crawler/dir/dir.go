@@ -78,8 +78,7 @@ func (ci *crawlerImplementation) AddDirectoryPath(path string) errors.Error {
 
 	exists := false
 	for _, dir := range ci.directories {
-		if dir == path {
-			exists = true
+		if exists = dir == path; exists {
 			break
 		}
 	}

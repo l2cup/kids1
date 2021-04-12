@@ -99,7 +99,7 @@ func (ci *crawlerImplementation) crawl() {
 func (ci *crawlerImplementation) crawlDir(path string) {
 
 	err := filepath.Walk(path, func(path string, f os.FileInfo, err error) error {
-		if !f.IsDir() && strings.HasPrefix(f.Name(), ci.prefix) {
+		if (f.IsDir() && !strings.HasPrefix(f.Name(), ci.prefix)) || !f.IsDir() {
 			return nil
 		}
 

@@ -1,9 +1,11 @@
 package result
 
 import (
-	"github.com/pkg/errors"
+	"fmt"
 	"sync"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/Jeffail/tunny"
 	"github.com/l2cup/kids1/pkg/dispatcher"
@@ -15,6 +17,7 @@ type Retriever interface {
 	Start()
 	Stop()
 	InitializeSummary(jobType dispatcher.JobType, corpusName string, jobs int, ttl time.Time)
+	IncrementResultCount(summaryType dispatcher.JobType, corpusName string) error
 	GetSummary(jobType dispatcher.JobType, corpusName string) (map[string]int64, error)
 	QuerySummary(jobType dispatcher.JobType, corpusName string) (map[string]int64, error)
 	UpdateSummary(results *Results)
@@ -41,9 +44,7 @@ func NewRetrieverImplementation(bufferSize int, logger *log.Logger) Retriever {
 		done:         make(chan struct{}),
 	}
 
-	pool := tunny.NewFunc(bufferSize, ri.poolAddResults)
-	ri.pool = pool
-
+	ri.pool = tunny.NewFunc(bufferSize, ri.poolAddResults)
 	return ri
 }
 
@@ -88,6 +89,18 @@ func (ri *retrieverImplementation) InitializeSummary(
 	summariesMap, ok := summaries.(cmap.ConcurrentMap)
 	if !ok {
 		ri.logger.Fatal("couldn't cast summaries to concurrent map")
+	}
+
+	if summariesMap.Has(corpusName) {
+		isummary, _ := summariesMap.Get(corpusName)
+		existing, ok := isummary.(Summary)
+		if !ok {
+			ri.logger.Fatal("couldn't cast summary to summary", "type", fmt.Sprintf("%T", isummary))
+		}
+
+		if existing.ttl.After(time.Now()) {
+			return
+		}
 	}
 
 	summariesMap.Set(corpusName, summary)
@@ -142,6 +155,16 @@ func (ri *retrieverImplementation) addResults(results *Results) {
 	if err != nil {
 		ri.logger.Error("there was an error while adding results", "err", err)
 	}
+}
+
+func (ri *retrieverImplementation) IncrementResultCount(summaryType dispatcher.JobType, corpusName string) error {
+	summary, err := ri.getSummary(summaryType, corpusName)
+	if err != nil {
+		return errors.Wrap(err, "couldn't increment result count")
+	}
+
+	summary.IncrementResultCount()
+	return nil
 }
 
 func (ri *retrieverImplementation) poolAddResults(payload interface{}) interface{} {

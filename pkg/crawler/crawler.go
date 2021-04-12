@@ -19,6 +19,10 @@ type FileCrawler interface {
 	Runner
 }
 
+type WebCrawler interface {
+	Runner
+}
+
 type Crawler struct {
 	Logger *log.Logger
 }

@@ -27,6 +27,7 @@ type FileCrawlerPayload struct {
 }
 
 type WebCrawlerPayload struct {
-	HopCount int
-	URL      string
+	CorpusName string
+	HopCount   int
+	URL        string
 }

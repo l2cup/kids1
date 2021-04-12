@@ -23,6 +23,8 @@ type Config struct {
 	QueuedFilesSizeLimit int64
 }
 
+var _ crawler.FileCrawler = (*crawlerImplementation)(nil)
+
 type crawlerImplementation struct {
 	*crawler.Crawler
 
@@ -39,8 +41,6 @@ type crawlerImplementation struct {
 	done chan struct{}
 }
 
-var _ crawler.FileCrawler = (*crawlerImplementation)(nil)
-
 func NewCrawlerImplementation(c *Config) crawler.FileCrawler {
 	ci := &crawlerImplementation{
 		Crawler:    c.Crawler,
@@ -54,9 +54,7 @@ func NewCrawlerImplementation(c *Config) crawler.FileCrawler {
 		queuedFilesSizeLimit: c.QueuedFilesSizeLimit,
 	}
 
-	pool := tunny.NewFunc(200, ci.countWordsMultipleFiles)
-	ci.pool = pool
-
+	ci.pool = tunny.NewFunc(200, ci.countWordsMultipleFiles)
 	return ci
 }
 
@@ -65,8 +63,6 @@ func (ci *crawlerImplementation) Start() {
 		select {
 		case msg := <-ci.dispatcher.Stream(dispatcher.DirectoryJobType):
 			go ci.handleDirectory(msg.Payload)
-		case msg := <-ci.dispatcher.Stream(dispatcher.FileJobType):
-			go ci.handleFile(msg.Payload)
 		case <-ci.done:
 			ci.pool.Close()
 			return
@@ -93,40 +89,29 @@ func (ci *crawlerImplementation) handleDirectory(payload dispatcher.JobPayload) 
 
 	ci.resultRetriever.InitializeSummary(dispatcher.FileJobType, dirPayload.CorpusName, len(filePayloads), time.Time{})
 
-	for _, fp := range filePayloads {
-		ci.dispatcher.Push(&dispatcher.Job{
-			Type:    dispatcher.FileJobType,
-			Payload: fp,
-		})
-	}
-}
-
-func (ci *crawlerImplementation) handleFile(payload dispatcher.JobPayload) {
-	defer ci.queuedFilesMutex.Unlock()
-	ci.queuedFilesMutex.Lock()
-
-	filePayload, ok := payload.(*dispatcher.FileCrawlerPayload)
-	if !ok {
-		ci.Logger.Error("couldn't cast file payload to file crawler")
-		return
+	minimumJobCount := dirPayload.Size / ci.queuedFilesSizeLimit
+	if minimumJobCount == 0 {
+		minimumJobCount = 1
 	}
 
-	if filePayload.Size+ci.queuedFilesSize > ci.queuedFilesSizeLimit {
-		ci.dispatcher.Push(&dispatcher.Job{
-			Payload: payload,
-			Type:    dispatcher.DirectoryJobType,
-		})
+	filesPerBatch := len(filePayloads) / int(minimumJobCount)
 
-		queuedFiles := append([]*dispatcher.FileCrawlerPayload{}, ci.queuedFiles...)
-		ci.queuedFiles = make([]*dispatcher.FileCrawlerPayload, 0, 0)
-		ci.queuedFilesSize = 0
+	if len(filePayloads)%int(minimumJobCount) > 0 {
+		filesPerBatch += 1
+	}
+
+	for i := 0; i < int(minimumJobCount); i++ {
+		queuedFiles := make([]*dispatcher.FileCrawlerPayload, 0, filesPerBatch)
+
+		for j := 0; j < filesPerBatch; j++ {
+			if (i*int(minimumJobCount) + j) == len(filePayloads) {
+				break
+			}
+			queuedFiles = append(queuedFiles, filePayloads[i*int(minimumJobCount)+j])
+		}
 
 		go ci.startCount(queuedFiles)
-		return
 	}
-
-	ci.queuedFiles = append(ci.queuedFiles, filePayload)
-	ci.queuedFilesSize += filePayload.Size
 }
 
 func (ci *crawlerImplementation) startCount(payload []*dispatcher.FileCrawlerPayload) {

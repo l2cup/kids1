@@ -37,6 +37,11 @@ func (s *Summary) QueryResults() map[string]int64 {
 	return nil
 }
 
+func (s *Summary) IncrementResultCount() {
+	s.wg.Add(1)
+	atomic.AddInt64(&s.counter, 1)
+}
+
 func (s *Summary) AddResults(results map[string]int64) {
 	defer s.mutex.Unlock()
 	s.mutex.Lock()

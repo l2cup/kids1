@@ -129,8 +129,13 @@ func (ri *retrieverImplementation) QuerySummary(
 ) (map[string]int64, error) {
 
 	summary, err := ri.getSummary(summaryType, corpusName)
+
 	if err != nil {
 		return nil, errors.Wrap(err, "couldn't get summary: ")
+	}
+
+	if !summary.ttl.IsZero() && summary.ttl.Before(time.Now()) {
+		return nil, errors.New("summary expired")
 	}
 
 	return summary.QueryResults(), nil
@@ -138,6 +143,27 @@ func (ri *retrieverImplementation) QuerySummary(
 
 func (ri *retrieverImplementation) UpdateSummary(results *Results) {
 	ri.resultsChan <- results
+}
+
+func (ri *retrieverImplementation) DeleteSummary(summaryType dispatcher.JobType, corpusName string) error {
+	summaries, ok := ri.summariesMap.Get(string(summaryType))
+	if !ok {
+		ri.logger.Error("summaries map for job type doesn't exist")
+		return errors.New("summaries map for job type doens't exist")
+	}
+
+	summariesMap, ok := summaries.(cmap.ConcurrentMap)
+	if !ok {
+		ri.logger.Fatal("couldn't cast summaries to concurrent map")
+		return errors.New("couldn't cast summaries to concurrent map")
+	}
+
+	exists := summariesMap.Has(corpusName)
+	if !exists {
+		return errors.New("summary doesn't exist")
+	}
+	summariesMap.Remove(corpusName)
+	return nil
 }
 
 func (ri *retrieverImplementation) addResults(results *Results) {

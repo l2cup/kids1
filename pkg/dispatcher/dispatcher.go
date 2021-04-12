@@ -6,12 +6,12 @@ import (
 )
 
 type Config struct {
-	Logger     log.Logger
+	Logger     *log.Logger
 	BufferSize int
 }
 
 type Dispatcher struct {
-	logger      log.Logger
+	logger      *log.Logger
 	dispatchMap cmap.ConcurrentMap
 	bufferSize  int
 }

@@ -31,10 +31,10 @@ func (s *Summary) GetResults() map[string]int64 {
 }
 
 func (s *Summary) QueryResults() map[string]int64 {
-	if atomic.LoadInt64(&s.counter) == 0 {
-		return s.results
+	if atomic.LoadInt64(&s.counter) != 0 {
+		return nil
 	}
-	return nil
+	return s.results
 }
 
 func (s *Summary) IncrementResultCount() {

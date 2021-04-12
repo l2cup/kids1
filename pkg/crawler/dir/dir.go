@@ -76,6 +76,9 @@ func (ci *crawlerImplementation) AddDirectoryPath(path string) errors.Error {
 	defer ci.mutex.Unlock()
 	ci.mutex.Lock()
 
+	ci.directories = append(ci.directories, path)
+	go ci.crawlDir(path)
+
 	return errors.Nil()
 }
 
@@ -99,7 +102,7 @@ func (ci *crawlerImplementation) crawl() {
 func (ci *crawlerImplementation) crawlDir(path string) {
 
 	err := filepath.Walk(path, func(path string, f os.FileInfo, err error) error {
-		if (f.IsDir() && !strings.HasPrefix(f.Name(), ci.prefix)) || !f.IsDir() {
+		if !strings.HasPrefix(f.Name(), ci.prefix) || !f.IsDir() {
 			return nil
 		}
 

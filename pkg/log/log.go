@@ -21,13 +21,6 @@ type Logger struct {
 
 type Config struct {
 	LogVerbosity string
-
-	SentryEnabled bool
-	SentryDSN     string
-
-	LogstashEnabled     bool
-	LogstashURL         string
-	LogstashServiceName string
 }
 
 func NewLogger(config *Config) (*Logger, error) {

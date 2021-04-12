@@ -97,6 +97,7 @@ func New() *App {
 }
 
 func (a *App) Stop() {
+	a.ResultRetriever.Stop()
 	a.WebCrawler.Stop()
 	a.FileCrawler.Stop()
 	a.DirectoryCrawler.Stop()

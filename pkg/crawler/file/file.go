@@ -183,5 +183,5 @@ func (ci *crawlerImplementation) countWords(filePayload *dispatcher.FileCrawlerP
 }
 
 func (ci *crawlerImplementation) Stop() {
-	<-ci.done
+	ci.done <- struct{}{}
 }

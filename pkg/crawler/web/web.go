@@ -104,7 +104,7 @@ func (ci *crawlerImplementation) startJob(payload dispatcher.JobPayload) {
 }
 
 func (ci *crawlerImplementation) crawlPage(payload interface{}) interface{} {
-	webPayload, ok := payload.(dispatcher.WebCrawlerPayload)
+	webPayload, ok := payload.(*dispatcher.WebCrawlerPayload)
 	if !ok {
 		ci.Logger.Error("payload not of type web crawler payload")
 	}

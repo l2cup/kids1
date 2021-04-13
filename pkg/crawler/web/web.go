@@ -115,7 +115,7 @@ func (ci *crawlerImplementation) crawlPage(payload interface{}) interface{} {
 		c.OnHTML("a[href]", ci.onHtml(webPayload.CorpusName, webPayload.HopCount))
 	}
 
-	c.OnResponse(ci.onResponse(webPayload.CorpusName, webPayload.HopCount))
+	c.OnScraped(ci.onScraped(webPayload.CorpusName, webPayload.HopCount))
 	c.IgnoreRobotsTxt = true
 	err := c.Visit(webPayload.URL)
 	if err != nil {
@@ -125,7 +125,7 @@ func (ci *crawlerImplementation) crawlPage(payload interface{}) interface{} {
 	return nil
 }
 
-func (ci *crawlerImplementation) onResponse(jobName string, hopCount int) colly.ResponseCallback {
+func (ci *crawlerImplementation) onScraped(jobName string, hopCount int) colly.ScrapedCallback {
 	return func(r *colly.Response) {
 		if r.StatusCode != http.StatusOK {
 			ci.Logger.Error("couldn't scrape web page and it's children",
@@ -174,6 +174,7 @@ func (ci *crawlerImplementation) onHtml(jobName string, hopCount int) colly.HTML
 				"err", err,
 				"job_name", jobName,
 			)
+			return
 		}
 
 		ci.dispatcher.Push(job)

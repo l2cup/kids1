@@ -1,7 +1,8 @@
 package result
 
 import (
-	"fmt"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +23,7 @@ type Retriever interface {
 	GetSummary(jobType dispatcher.JobType, corpusName string) (map[string]int64, error)
 	GetSummaries(summaryType dispatcher.JobType) (map[string]map[string]int64, error)
 	QuerySummary(jobType dispatcher.JobType, corpusName string) (map[string]int64, error)
+	QueryWebSummary(corpusName string) (map[string]int64, error)
 	DeleteSummary(summaryType dispatcher.JobType)
 	UpdateSummary(results *Results)
 }
@@ -98,18 +100,6 @@ func (ri *retrieverImplementation) InitializeSummary(
 		ri.logger.Fatal("couldn't cast summaries to concurrent map")
 	}
 
-	if summariesMap.Has(corpusName) {
-		isummary, _ := summariesMap.Get(corpusName)
-		existing, ok := isummary.(*Summary)
-		if !ok {
-			ri.logger.Fatal("couldn't cast summary to summary", "type", fmt.Sprintf("%T", isummary))
-		}
-
-		if existing.ttl.After(time.Now()) {
-			return
-		}
-	}
-
 	ri.logger.Info("created corpus", "corpus_name", corpusName, "summary", summary)
 	summariesMap.Set(corpusName, summary)
 }
@@ -118,6 +108,9 @@ func (ri *retrieverImplementation) GetSummary(
 	summaryType dispatcher.JobType,
 	corpusName string,
 ) (map[string]int64, error) {
+	if summaryType == dispatcher.WebJobType {
+		return ri.getWebSummary(corpusName)
+	}
 
 	summary, err := ri.getSummary(summaryType, corpusName)
 	if err != nil {
@@ -150,6 +143,10 @@ func (ri *retrieverImplementation) QuerySummary(
 }
 
 func (ri *retrieverImplementation) GetSummaries(summaryType dispatcher.JobType) (map[string]map[string]int64, error) {
+	if summaryType == dispatcher.WebJobType {
+		return ri.getWebSummaries()
+	}
+
 	summaries, ok := ri.summariesMap.Get(string(summaryType))
 	if !ok {
 		ri.logger.Error("summaries map for job type doesn't exist")
@@ -199,7 +196,7 @@ func (ri *retrieverImplementation) addResults(results *Results) {
 		return
 	}
 
-	ri.logger.Debug("starting pool results adding")
+	ri.logger.Debug("starting pool results adding", "results", results)
 	_, err := ri.pool.ProcessTimed(results, 60*time.Second)
 
 	if err == tunny.ErrJobTimedOut {
@@ -208,7 +205,7 @@ func (ri *retrieverImplementation) addResults(results *Results) {
 	}
 
 	if err != nil {
-		ri.logger.Error("there was an error while adding results", "err", err)
+		ri.logger.Error("there was an error while adding results", "err", err, "corpus_name", results.CorpusName)
 	}
 }
 
@@ -265,4 +262,137 @@ func (ri *retrieverImplementation) getSummary(
 	}
 
 	return summary, nil
+}
+
+func (ri *retrieverImplementation) getWebSummaries() (map[string]map[string]int64, error) {
+	summaries, ok := ri.summariesMap.Get(string(dispatcher.WebJobType))
+	if !ok {
+		ri.logger.Error("summaries map for job type doesn't exist")
+		return nil, errors.New("summaries map for job type doens't exist")
+	}
+
+	summariesMap, ok := summaries.(cmap.ConcurrentMap)
+	if !ok {
+		ri.logger.Fatal("couldn't cast summaries to concurrent map")
+		return nil, errors.New("couldn't cast summaries to concurrent map")
+	}
+
+	retMap := make(map[string]map[string]int64)
+	mutex := sync.Mutex{}
+
+	for kvPair := range summariesMap.IterBuffered() {
+		summary, ok := kvPair.Val.(*Summary)
+		if !ok {
+			return nil, errors.New("map value couldn't be cast as summary")
+		}
+
+		URL, err := url.Parse(kvPair.Key)
+		if err != nil {
+			continue
+		}
+
+		urlString := URL.Scheme + "://" + URL.Host
+		if _, ok := retMap[urlString]; !ok {
+			mutex.Lock()
+			retMap[urlString] = make(map[string]int64)
+			mutex.Unlock()
+		}
+
+		go func(summary *Summary, url string) {
+			defer mutex.Unlock()
+			results := summary.GetResults()
+			mutex.Lock()
+
+			for kk, vv := range results {
+				retMap[url][kk] = retMap[url][kk] + vv
+			}
+
+		}(summary, urlString)
+	}
+
+	return retMap, nil
+}
+
+func (ri *retrieverImplementation) QueryWebSummary(corpusName string) (map[string]int64, error) {
+	summaries, ok := ri.summariesMap.Get(string(dispatcher.WebJobType))
+	if !ok {
+		ri.logger.Error("summaries map for job type doesn't exist")
+		return nil, errors.New("summaries map for job type doens't exist")
+	}
+
+	summariesMap, ok := summaries.(cmap.ConcurrentMap)
+	if !ok {
+		ri.logger.Fatal("couldn't cast summaries to concurrent map")
+		return nil, errors.New("couldn't cast summaries to concurrent map")
+	}
+
+	retMap := make(map[string]int64)
+	mutex := sync.Mutex{}
+
+	for kvPair := range summariesMap.IterBuffered() {
+		if !strings.HasPrefix(kvPair.Key, corpusName) {
+			continue
+		}
+
+		summary, ok := kvPair.Val.(*Summary)
+		if !ok {
+			return nil, errors.New("map value couldn't be cast as summary")
+		}
+
+		go func(summary *Summary, corpusName string) {
+			defer mutex.Unlock()
+			results := summary.GetResults()
+			mutex.Lock()
+
+			for kk, vv := range results {
+				retMap[kk] = retMap[kk] + vv
+			}
+
+		}(summary, kvPair.Key)
+	}
+
+	return retMap, nil
+}
+
+func (ri *retrieverImplementation) getWebSummary(corpusName string) (map[string]int64, error) {
+	if corpusName == "" {
+		return nil, errors.New("no url given")
+	}
+	summaries, ok := ri.summariesMap.Get(string(dispatcher.WebJobType))
+	if !ok {
+		ri.logger.Error("summaries map for job type doesn't exist")
+		return nil, errors.New("summaries map for job type doens't exist")
+	}
+
+	summariesMap, ok := summaries.(cmap.ConcurrentMap)
+	if !ok {
+		ri.logger.Fatal("couldn't cast summaries to concurrent map")
+		return nil, errors.New("couldn't cast summaries to concurrent map")
+	}
+
+	retMap := make(map[string]int64)
+
+	for kvPair := range summariesMap.IterBuffered() {
+		if !strings.HasPrefix(kvPair.Key, corpusName) {
+			continue
+		}
+
+		summary, ok := kvPair.Val.(*Summary)
+		if !ok {
+			return nil, errors.New("map value couldn't be cast as summary")
+		}
+
+		results := summary.QueryResults()
+
+		if results == nil {
+			return nil, nil
+		}
+
+		for kk, vv := range results {
+			retMap[kk] = retMap[kk] + vv
+		}
+
+	}
+
+	return retMap, nil
 }

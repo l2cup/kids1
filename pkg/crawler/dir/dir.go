@@ -11,13 +11,15 @@ import (
 	"github.com/l2cup/kids1/pkg/crawler"
 	"github.com/l2cup/kids1/pkg/dispatcher"
 	"github.com/l2cup/kids1/pkg/errors"
+	"github.com/l2cup/kids1/pkg/runner"
 )
 
 type Config struct {
-	Crawler     *crawler.Crawler
-	SleepTimeMS uint64
-	Prefix      string
-	Dispatcher  *dispatcher.Dispatcher
+	Crawler           *crawler.Crawler
+	SleepTimeMS       uint64
+	Prefix            string
+	Dispatcher        *dispatcher.Dispatcher
+	RunnerRegistrator runner.Registrator
 }
 
 type crawlerImplementation struct {
@@ -34,6 +36,7 @@ type crawlerImplementation struct {
 }
 
 var _ crawler.DirCrawler = (*crawlerImplementation)(nil)
+var _ runner.Runner = (*crawlerImplementation)(nil)
 
 func NewCrawlerImplementation(c *Config) crawler.DirCrawler {
 	sleepTime, err := time.ParseDuration(fmt.Sprintf("%dms", c.SleepTimeMS))
@@ -41,7 +44,7 @@ func NewCrawlerImplementation(c *Config) crawler.DirCrawler {
 		c.Crawler.Logger.Fatal("couldn't parse dir sleep time duration", "err", err, "duration", c.SleepTimeMS)
 	}
 
-	return &crawlerImplementation{
+	ci := &crawlerImplementation{
 		Crawler:           c.Crawler,
 		lastModifiedCache: make(map[string]time.Time),
 		dispatcher:        c.Dispatcher,
@@ -51,6 +54,9 @@ func NewCrawlerImplementation(c *Config) crawler.DirCrawler {
 		mutex:             sync.Mutex{},
 		prefix:            c.Prefix,
 	}
+
+	c.RunnerRegistrator.Register(ci)
+	return ci
 }
 
 func (ci *crawlerImplementation) Start() {

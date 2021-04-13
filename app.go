@@ -11,6 +11,7 @@ import (
 	"github.com/l2cup/kids1/pkg/dispatcher"
 	"github.com/l2cup/kids1/pkg/log"
 	"github.com/l2cup/kids1/pkg/result"
+	"github.com/l2cup/kids1/pkg/runner"
 )
 
 const (
@@ -23,6 +24,9 @@ const (
 	ConfigPathDefaultJson = "./config.json"
 )
 
+var _ runner.Runner = (*App)(nil)
+var _ runner.Registrator = (*App)(nil)
+
 type App struct {
 	Logger           *log.Logger
 	Configuration    *config.SystemConfig
@@ -31,12 +35,14 @@ type App struct {
 	DirectoryCrawler crawler.DirCrawler
 	FileCrawler      crawler.FileCrawler
 	WebCrawler       crawler.WebCrawler
+
+	runners []runner.Runner
 }
 
 func New() *App {
 	logger, err := log.NewLogger(&log.Config{
-		LogVerbosity: config.GetEnv(EnvLogVerbosity, EnvNotSet),
-		//LogVerbosity: log.DebugVerbosity,
+		//LogVerbosity: config.GetEnv(EnvLogVerbosity, EnvNotSet),
+		LogVerbosity: log.DebugVerbosity,
 	})
 
 	if err != nil {
@@ -59,46 +65,57 @@ func New() *App {
 		BufferSize: 50,
 	})
 
-	resultRetriever := result.NewRetrieverImplementation(50, logger)
+	app := &App{
+		Logger:        logger,
+		Configuration: syscfg,
+		Dispatcher:    dispatcher,
+		runners:       make([]runner.Runner, 0),
+	}
 
-	directoryCrawler := dir.NewCrawlerImplementation(&dir.Config{
-		Crawler:     crawler.New(logger),
-		Dispatcher:  dispatcher,
-		SleepTimeMS: syscfg.DirCrawlerSleepTimeMS,
-		Prefix:      syscfg.Prefix,
+	app.ResultRetriever = result.NewRetrieverImplementation(50, logger, app)
+
+	app.DirectoryCrawler = dir.NewCrawlerImplementation(&dir.Config{
+		Crawler:           crawler.New(logger),
+		Dispatcher:        dispatcher,
+		SleepTimeMS:       syscfg.DirCrawlerSleepTimeMS,
+		Prefix:            syscfg.Prefix,
+		RunnerRegistrator: app,
 	})
 
-	fileCrawler := file.NewCrawlerImplementation(&file.Config{
+	app.FileCrawler = file.NewCrawlerImplementation(&file.Config{
 		Crawler:              crawler.New(logger),
 		Dispatcher:           dispatcher,
-		ResultRetriever:      resultRetriever,
+		ResultRetriever:      app.ResultRetriever,
 		Keywords:             syscfg.Keywords,
 		QueuedFilesSizeLimit: syscfg.FileScanningSizeLimit,
+		RunnerRegistrator:    app,
 	})
 
-	webCrawler := web.NewCrawlerImplementation(&web.Config{
-		Crawler:         crawler.New(logger),
-		Dispatcher:      dispatcher,
-		ResultRetriever: resultRetriever,
-		InitialHopCount: syscfg.HopCount,
-		Keywords:        syscfg.Keywords,
-		TTLMS:           syscfg.URLRefreshTimeMS,
+	app.WebCrawler = web.NewCrawlerImplementation(&web.Config{
+		Crawler:           crawler.New(logger),
+		Dispatcher:        dispatcher,
+		ResultRetriever:   app.ResultRetriever,
+		InitialHopCount:   syscfg.HopCount,
+		Keywords:          syscfg.Keywords,
+		TTLMS:             syscfg.URLRefreshTimeMS,
+		RunnerRegistrator: app,
 	})
 
-	return &App{
-		Logger:           logger,
-		Configuration:    syscfg,
-		Dispatcher:       dispatcher,
-		ResultRetriever:  resultRetriever,
-		DirectoryCrawler: directoryCrawler,
-		FileCrawler:      fileCrawler,
-		WebCrawler:       webCrawler,
-	}
+	return app
 }
 
 func (a *App) Stop() {
-	a.ResultRetriever.Stop()
-	a.WebCrawler.Stop()
-	a.FileCrawler.Stop()
-	a.DirectoryCrawler.Stop()
+	for _, r := range a.runners {
+		r.Stop()
+	}
+}
+
+func (a *App) Start() {
+	for _, r := range a.runners {
+		go r.Start()
+	}
+}
+
+func (a *App) Register(r runner.Runner) {
+	a.runners = append(a.runners, r)
 }

@@ -3,24 +3,21 @@ package crawler
 import (
 	"github.com/l2cup/kids1/pkg/errors"
 	"github.com/l2cup/kids1/pkg/log"
+	"github.com/l2cup/kids1/pkg/runner"
 )
 
-type Runner interface {
-	Start()
-	Stop()
-}
-
 type DirCrawler interface {
-	Runner
+	runner.Runner
 	AddDirectoryPath(path string) errors.Error
 }
 
 type FileCrawler interface {
-	Runner
+	runner.Runner
 }
 
 type WebCrawler interface {
-	Runner
+	runner.Runner
+	AddWebPage(url string)
 }
 
 type Crawler struct {

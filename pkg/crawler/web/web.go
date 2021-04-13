@@ -11,18 +11,21 @@ import (
 	"github.com/l2cup/kids1/pkg/crawler"
 	"github.com/l2cup/kids1/pkg/dispatcher"
 	"github.com/l2cup/kids1/pkg/result"
+	"github.com/l2cup/kids1/pkg/runner"
 )
 
 type Config struct {
-	Crawler         *crawler.Crawler
-	Dispatcher      *dispatcher.Dispatcher
-	ResultRetriever result.Retriever
-	InitialHopCount int
-	Keywords        []string
-	TTLMS           uint64
+	RunnerRegistrator runner.Registrator
+	Crawler           *crawler.Crawler
+	Dispatcher        *dispatcher.Dispatcher
+	ResultRetriever   result.Retriever
+	InitialHopCount   int
+	Keywords          []string
+	TTLMS             uint64
 }
 
 var _ crawler.WebCrawler = (*crawlerImplementation)(nil)
+var _ runner.Runner = (*crawlerImplementation)(nil)
 
 type crawlerImplementation struct {
 	*crawler.Crawler
@@ -51,13 +54,14 @@ func NewCrawlerImplementation(c *Config) crawler.WebCrawler {
 		ttl:             ttl,
 	}
 
+	c.RunnerRegistrator.Register(ci)
 	ci.pool = tunny.NewFunc(200, ci.crawlPage)
 	return ci
 }
 
-func (ci *crawlerImplementation) AddWebPage(url string, ttl time.Duration) {
+func (ci *crawlerImplementation) AddWebPage(url string) {
 	ci.resultRetriever.InitializeSummary(
-		dispatcher.WebJobType, url, 1, time.Now().Add(ttl))
+		dispatcher.WebJobType, url, 1, time.Now().Add(ci.ttl))
 
 	ci.dispatcher.Push(&dispatcher.Job{
 		Type: dispatcher.WebJobType,
@@ -119,7 +123,11 @@ func (ci *crawlerImplementation) crawlPage(payload interface{}) interface{} {
 	c.IgnoreRobotsTxt = true
 	err := c.Visit(webPayload.URL)
 	if err != nil {
-		ci.Logger.Error("error visiting url", "err", err)
+		ci.Logger.Error("error visiting url", "err", err, "url", webPayload.URL)
+		ci.resultRetriever.UpdateSummary(&result.Results{
+			JobType:    dispatcher.WebJobType,
+			CorpusName: webPayload.CorpusName,
+		})
 	}
 
 	return nil
@@ -146,6 +154,8 @@ func (ci *crawlerImplementation) onScraped(jobName string, hopCount int) colly.S
 			}
 		}
 
+		ci.Logger.Debug("web job finished, updating summary", "results", results)
+
 		ci.resultRetriever.UpdateSummary(&result.Results{
 			CorpusName: jobName,
 			JobType:    dispatcher.WebJobType,
@@ -157,6 +167,11 @@ func (ci *crawlerImplementation) onScraped(jobName string, hopCount int) colly.S
 func (ci *crawlerImplementation) onHtml(jobName string, hopCount int) colly.HTMLCallback {
 	return func(e *colly.HTMLElement) {
 		url := e.Attr("href")
+
+		if strings.HasPrefix(url, "/") {
+			url = "http://" + e.Request.URL.Host + url
+		}
+
 		payload := &dispatcher.WebCrawlerPayload{
 			CorpusName: jobName,
 			HopCount:   hopCount - 1,

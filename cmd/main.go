@@ -17,10 +17,7 @@ func main() {
 	app := kids1.New()
 	cmd := createCmd(app)
 
-	go app.DirectoryCrawler.Start()
-	go app.FileCrawler.Start()
-	go app.WebCrawler.Start()
-	go app.ResultRetriever.Start()
+	app.Start()
 
 	startLoop(cmd, app)
 }
@@ -44,10 +41,12 @@ func createCmd(app *kids1.App) *cli.App {
 
 	cmd.Commands = []*cli.Command{
 		client.NewAddDir(app),
+		client.NewAddWeb(app),
 		client.NewGet(app),
+		client.NewQuery(app),
 		client.NewSummary(app),
 		client.NewCFS(app),
-		client.NewQuery(app),
+		client.NewCWS(app),
 	}
 
 	return cmd

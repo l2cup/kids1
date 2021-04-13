@@ -10,12 +10,13 @@ import (
 	"github.com/Jeffail/tunny"
 	"github.com/l2cup/kids1/pkg/dispatcher"
 	"github.com/l2cup/kids1/pkg/log"
+	"github.com/l2cup/kids1/pkg/runner"
 	cmap "github.com/orcaman/concurrent-map"
 )
 
 type Retriever interface {
-	Start()
-	Stop()
+	runner.Runner
+
 	InitializeSummary(jobType dispatcher.JobType, corpusName string, jobs int, ttl time.Time)
 	IncrementResultCount(summaryType dispatcher.JobType, corpusName string) error
 	GetSummary(jobType dispatcher.JobType, corpusName string) (map[string]int64, error)
@@ -24,6 +25,9 @@ type Retriever interface {
 	DeleteSummary(summaryType dispatcher.JobType)
 	UpdateSummary(results *Results)
 }
+
+var _ Retriever = (*retrieverImplementation)(nil)
+var _ runner.Runner = (*retrieverImplementation)(nil)
 
 type retrieverImplementation struct {
 	logger       *log.Logger
@@ -34,7 +38,7 @@ type retrieverImplementation struct {
 	done chan struct{}
 }
 
-func NewRetrieverImplementation(bufferSize int, logger *log.Logger) Retriever {
+func NewRetrieverImplementation(bufferSize int, logger *log.Logger, registrator runner.Registrator) Retriever {
 	summariesMap := cmap.New()
 	summariesMap.Set(string(dispatcher.FileJobType), cmap.New())
 	summariesMap.Set(string(dispatcher.WebJobType), cmap.New())
@@ -46,6 +50,7 @@ func NewRetrieverImplementation(bufferSize int, logger *log.Logger) Retriever {
 		done:         make(chan struct{}),
 	}
 
+	registrator.Register(ri)
 	ri.pool = tunny.NewFunc(bufferSize, ri.poolAddResults)
 	return ri
 }
@@ -159,6 +164,8 @@ func (ri *retrieverImplementation) GetSummaries(summaryType dispatcher.JobType) 
 
 	mutex := sync.Mutex{}
 	retMap := make(map[string]map[string]int64)
+
+	ri.logger.Debug("summaries len", "len", summariesMap.Count())
 
 	for kvPair := range summariesMap.IterBuffered() {
 		summary, ok := kvPair.Val.(*Summary)

@@ -13,10 +13,12 @@ import (
 	"github.com/l2cup/kids1/pkg/crawler"
 	"github.com/l2cup/kids1/pkg/dispatcher"
 	"github.com/l2cup/kids1/pkg/result"
+	"github.com/l2cup/kids1/pkg/runner"
 )
 
 type Config struct {
 	Crawler              *crawler.Crawler
+	RunnerRegistrator    runner.Registrator
 	Dispatcher           *dispatcher.Dispatcher
 	ResultRetriever      result.Retriever
 	Keywords             []string
@@ -24,6 +26,7 @@ type Config struct {
 }
 
 var _ crawler.FileCrawler = (*crawlerImplementation)(nil)
+var _ runner.Runner = (*crawlerImplementation)(nil)
 
 type crawlerImplementation struct {
 	*crawler.Crawler
@@ -47,6 +50,7 @@ func NewCrawlerImplementation(c *Config) crawler.FileCrawler {
 		queuedFilesSizeLimit: c.QueuedFilesSizeLimit,
 	}
 
+	c.RunnerRegistrator.Register(ci)
 	ci.pool = tunny.NewFunc(200, ci.wordCounterWorker)
 	return ci
 }

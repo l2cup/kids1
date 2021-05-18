@@ -51,7 +51,7 @@ func NewQueryWebCorpus(app *kids1.App) *cli.Command {
 		Name:  "web",
 		Usage: "Queries web corpuses",
 		Action: func(c *cli.Context) error {
-			results, err := app.ResultRetriever.QueryWebSummary(c.Args().Get(0))
+			results, err := app.ResultRetriever.QuerySummary(dispatcher.WebJobType, c.Args().Get(0))
 			if err != nil {
 				fmt.Println(color.Red(err))
 				return nil

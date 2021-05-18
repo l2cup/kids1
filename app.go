@@ -55,16 +55,8 @@ func New() *App {
 			"err", err)
 		syscfg, err = config.LoadConfigFile(config.GetEnv(EnvJsonCofigPath, ConfigPathDefaultJson))
 		if err != nil {
-			logger.Error("[syscfg]couldn't load json syscfg, using defaults.",
+			logger.Fatal("[syscfg]couldn't load json syscfg, exiting.",
 				"err", err)
-			syscfg = &config.SystemConfig{
-				Keywords:              []string{"one", "two", "three", "Core"},
-				Prefix:                "corpus_",
-				URLRefreshTimeMS:      86400000,
-				FileScanningSizeLimit: 1048576,
-				DirCrawlerSleepTimeMS: 1000,
-				HopCount:              1,
-			}
 		}
 	}
 

@@ -3,7 +3,6 @@ package web
 import (
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -61,8 +60,8 @@ func NewCrawlerImplementation(c *Config) crawler.WebCrawler {
 }
 
 func (ci *crawlerImplementation) AddWebPage(url string) {
-	//ci.resultRetriever.InitializeSummary(
-	//	dispatcher.WebJobType, url, 1, time.Now().Add(ci.ttl))
+	ci.resultRetriever.InitializeSummary(
+		dispatcher.WebJobType, url, 1, time.Now().Add(ci.ttl))
 
 	ci.dispatcher.Push(&dispatcher.Job{
 		Type: dispatcher.WebJobType,
@@ -127,7 +126,7 @@ func (ci *crawlerImplementation) crawlPage(payload interface{}) interface{} {
 		ci.Logger.Error("error visiting url", "err", err, "url", webPayload.URL)
 		ci.resultRetriever.UpdateSummary(&result.Results{
 			JobType:    dispatcher.WebJobType,
-			CorpusName: webPayload.URL,
+			CorpusName: webPayload.CorpusName,
 		})
 	}
 
@@ -167,24 +166,16 @@ func (ci *crawlerImplementation) onScraped(jobName string, hopCount int) colly.S
 
 func (ci *crawlerImplementation) onHtml(jobName string, hopCount int) colly.HTMLCallback {
 	return func(e *colly.HTMLElement) {
-		URL := e.Attr("href")
+		url := e.Attr("href")
 
-		if strings.HasPrefix(URL, "/") {
-			URL = "http://" + e.Request.URL.Host + URL
-		}
-
-		if _, err := url.ParseRequestURI(URL); err != nil {
-			return
-		}
-
-		if e.Request.URL.Scheme != "http" && e.Request.URL.Scheme != "https" {
-			return
+		if strings.HasPrefix(url, "/") {
+			url = "http://" + e.Request.URL.Host + url
 		}
 
 		payload := &dispatcher.WebCrawlerPayload{
-			CorpusName: URL,
+			CorpusName: jobName,
 			HopCount:   hopCount - 1,
-			URL:        URL,
+			URL:        url,
 		}
 
 		job := &dispatcher.Job{
@@ -192,11 +183,15 @@ func (ci *crawlerImplementation) onHtml(jobName string, hopCount int) colly.HTML
 			Payload: payload,
 		}
 
-		if _, err := ci.resultRetriever.QuerySummary(dispatcher.WebJobType, URL); err != nil {
-			ci.dispatcher.Push(job)
-			ci.resultRetriever.InitializeSummary(
-				dispatcher.WebJobType, URL, 1, time.Now().Add(ci.ttl))
+		err := ci.resultRetriever.IncrementResultCount(dispatcher.WebJobType, jobName)
+		if err != nil {
+			ci.Logger.Error("couldn't increment result count for web jobs",
+				"err", err,
+				"job_name", jobName,
+			)
 			return
 		}
+
+		ci.dispatcher.Push(job)
 	}
 }
